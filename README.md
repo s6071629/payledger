@@ -32,5 +32,5 @@ The system focuses on important backend concepts such as database transactions, 
 | MySQL 8 | Relational database |
 | mysql2 | MySQL driver |
 | bcrypt | Password hashing |
-| Postman | API testing, Authorization |
+| Postman | API testing, JWT Authentication |
 
