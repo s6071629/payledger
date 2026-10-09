@@ -4,10 +4,12 @@ const router = express.Router();
 const { createAccount, getBalance, getDetails} = 
 require('../controllers/accountControllers');
 
-router.post("/:id/create", createAccount);
+const protect = require('../middleware/authMiddleware');
 
-router.get("/:id/balance", getBalance);
+router.post("/create",protect, createAccount);
 
-router.get("/:id/details", getDetails);
+router.get("/balance",protect, getBalance);
+
+router.get("/me",protect, getDetails);
 
 module.exports = router;

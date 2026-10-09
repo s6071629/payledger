@@ -4,7 +4,8 @@ const bcrypt = require('bcrypt');
 
 const createAccount = asyncHandler(async (req, res) => {
     const { password, account_type } = req.body;
-    const { id } = req.params;
+
+    const userId = req.user.user_id;
 
     if (!password || !account_type) {
         return res.status(400).json({
@@ -14,7 +15,7 @@ const createAccount = asyncHandler(async (req, res) => {
 
     const checkSql = `select account_id from accounts where user_id = ?`;
 
-    const [results] = await db.query(checkSql, [id]);
+    const [results] = await db.query(checkSql, [userId]);
 
     if (results.length > 0) {
         return res.status(409).json({
@@ -27,22 +28,22 @@ const createAccount = asyncHandler(async (req, res) => {
     const insertSql = `insert into accounts (user_id, account_type, password)
         values (?, ?, ?)`;
 
-    const [result] = await db.query(insertSql,[id, account_type, hashedPassword]);
+    const [result] = await db.query(insertSql,[userId, account_type, hashedPassword]);
 
     return res.status(201).json({
         message: "Account created successfully",
         account_id: result.insertId,
-        user_id: id,
+        user_id: userId,
         account_type: account_type
     });
 });
 
 const getBalance = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const userId = req.user.user_id;
 
-    const getQuery = `select balance from accounts where user_id = ?`;
+    const sql = `select balance from accounts where user_id = ?`;
 
-    const [result] = await db.query(getQuery, [id]);
+    const [result] = await db.query(sql, [userId]);
 
     if (result.length === 0) {
         return res.status(404).json({
@@ -56,10 +57,12 @@ const getBalance = asyncHandler(async (req, res) => {
 });
 
 const getDetails = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const getQuery = `select account_id, account_type, balance, created_at
+    const userId = req.user.user_id;
+
+    const sql = `select account_id, account_type, balance, created_at
         from accounts where user_id = ?`;
-    const [result] = await db.query(getQuery, [id]);
+
+    const [result] = await db.query(sql, [userId]);
 
     if (result.length === 0) {
         return res.status(404).json({
@@ -68,9 +71,9 @@ const getDetails = asyncHandler(async (req, res) => {
     }
 
     return res.status(200).json({
-        accountId: result[0].account_id,
-        balance: result[0].balance,
+        account_id: result[0].account_id,
         account_type: result[0].account_type,
+        balance: result[0].balance,
         created_at: result[0].created_at
     });
 });

@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const {deposit, withdrawal, transfer, getAll} = require('../controllers/transactionControllers');
+const protect = require('../middleware/authMiddleware');
 
-router.post("/:id/deposit", deposit);
+router.post("/deposit", protect, deposit);
 
-router.post("/:id/withdrawal", withdrawal);
+router.post("/withdraw", protect, withdrawal);
 
-router.post("/transfer", transfer);
+router.post("/transfer", protect, transfer);
 
-router.get("/:id/getAll", getAll);
+router.get("/getAll",protect, getAll);
 
 module.exports = router;

@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const db = require('../config/db');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { userName, pw } = req.body;
@@ -35,18 +36,16 @@ const registerUser = asyncHandler(async (req, res) => {
     });
 });
 
-
 const getUser = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    if (!id) {
-        return res.status(400).json({
-            message: "Enter id"
-        });
-    }
 
-    const sql = `select user_id, user_name from users where user_id = ?`;
+    const userId = req.user.user_id;
 
-    const [results] = await db.query(sql, [id]);
+    console.log("USER ID:", userId);
+
+    const sql = `select user_id, user_name, created_at
+        from users where user_id = ?`;
+
+    const [results] = await db.query(sql, [userId]);
 
     if (results.length === 0) {
         return res.status(404).json({
@@ -56,12 +55,65 @@ const getUser = asyncHandler(async (req, res) => {
 
     return res.status(200).json({
         user_id: results[0].user_id,
-        user_name: results[0].user_name
+        user_name: results[0].user_name,
+        created_at: results[0].created_at
+    });
+});
+
+
+const loginUser = asyncHandler(async (req, res) => {
+    const { userName, pw } = req.body;
+    if (!userName || !pw) {
+        return res.status(400).json({
+            message: 'Please enter userName and password'
+        });
+    }
+
+    const sql = `select user_id, user_name, password from users
+        where user_name = ?`;
+
+    const [users] = await db.query(sql, [userName]);
+    if (users.length === 0) {
+        return res.status(401).json({
+            message: 'Invalid username or password'
+        });
+    }
+    const user = users[0];
+
+    const passwordMatch = await bcrypt.compare(pw,user.password);
+
+    if (!passwordMatch) {
+        return res.status(401).json({
+            message: 'Invalid username or password'
+        });
+    }
+
+    const payload = {
+    user_id: user.user_id,
+    user_name: user.user_name
+};
+
+console.log("PAYLOAD:", payload);
+
+    const token = jwt.sign({
+            user_id: user.user_id,
+            user_name: user.user_name
+        },
+        process.env.JWT_SECRET, {
+            expiresIn: process.env.JWT_EXPIRES_IN || '1h'
+        }
+    );
+    const testDecoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    return res.status(200).json({
+        message: 'Login successful',
+        token: token
     });
 });
 
 
 module.exports = {
     registerUser,
-    getUser
+    getUser,
+    loginUser
 };

@@ -1,14 +1,13 @@
 const asyncHandler = require('express-async-handler');
 const db = require('../config/db');
-const {depositToAccount, withdrawFromAccount} = require("../services/transferControllers");
+const {depositToAccount, withdrawFromAccount} 
+= require("../services/transferControllers");
 
 const deposit = asyncHandler(async (req, res) => {
-
     const { amount } = req.body;
-    const { id } = req.params;
+    const userId = req.user.user_id;
     const idempotencyKey = req.headers["idempotency-key"];
-
-    if (!amount || amount <= 0) {
+    if (!amount || Number(amount) <= 0) {
         return res.status(400).json({
             message: "Enter a valid amount"
         });
@@ -24,17 +23,21 @@ const deposit = asyncHandler(async (req, res) => {
 
     try {
         await connection.beginTransaction();
+        const [accounts] = await connection.query(
+            `select account_id from accounts where user_id = ?
+            for update`,[userId]);
 
+        if (accounts.length === 0) {
+            throw new Error("Account not found");
+        }
+
+        const accountId = accounts[0].account_id;
         const [existing] = await connection.query(
-            `select transaction_id, status
-             from transactions
-             where idempotency_key = ?`,
-            [idempotencyKey]
-        );
+            `select transaction_id, statusfrom transactions
+            where idempotency_key = ?`,[idempotencyKey]);
 
         if (existing.length > 0) {
             await connection.rollback();
-            connection.release();
             return res.status(200).json({
                 message: "Transaction already exists",
                 transaction_id: existing[0].transaction_id,
@@ -43,49 +46,20 @@ const deposit = asyncHandler(async (req, res) => {
         }
 
         const [transaction] = await connection.query(
-            `insert into transactions
-             (idempotency_key, type, status)
-             values (?,'deposit', 'processing')`,
-            [idempotencyKey]
-        );
+            `insert into transactions (idempotency_key, type, status)
+            values (?, 'deposit', 'processing')`,[idempotencyKey]);
 
         const transactionId = transaction.insertId;
 
-        const [accounts] = await connection.query(
-            `select account_id, balance
-             from accounts
-             where account_id = ?
-             for update`,
-            [id]
-        );
-
-        if (accounts.length === 0) {
-            throw new Error("Account not found");
-        }
-
-        const account = accounts[0];
-        const newBalance = Number(account.balance) + Number(amount);
+        const newBalance = await depositToAccount(connection,accountId,
+            amount, transactionId);
 
         await connection.query(
-            `update accounts
-             set balance = ?
-             where account_id = ?`,
-            [newBalance, account.account_id]
-        );
-        await connection.query(
-            `insert into ledger
-             (transaction_id, account_id, direction, amount, balance_after)
-             VALUES (?, ?, 'credit', ?, ?)`,
-            [transactionId,account.account_id,amount,newBalance]
-        );
-        await connection.query(
-            `update transactions
-            set status = 'completed'
-            where transaction_id = ?`,
-            [transactionId]
-        );
+            `update transactions set status = 'completed'
+            where transaction_id = ?`, [transactionId]);
+
         await connection.commit();
-        connection.release();
+
         return res.status(200).json({
             message: "Deposit successful",
             transaction_id: transactionId,
@@ -95,23 +69,21 @@ const deposit = asyncHandler(async (req, res) => {
 
     } catch (error) {
         await connection.rollback();
-        connection.release();
         console.error(error);
         return res.status(500).json({
-            message: "Deposit failed"
+            message: error.message || "Deposit failed"
         });
     } finally {
-       connection.release();
+        connection.release();
     }
 });
 
 const withdrawal = asyncHandler(async (req, res) => {
-
     const { amount } = req.body;
-    const { id } = req.params;
+    const userId = req.user.user_id;
     const idempotencyKey = req.headers["idempotency-key"];
 
-    if (!amount || amount <= 0) {
+    if (!amount || Number(amount) <= 0) {
         return res.status(400).json({
             message: "Enter a valid amount"
         });
@@ -124,20 +96,24 @@ const withdrawal = asyncHandler(async (req, res) => {
     }
 
     const connection = await db.getConnection();
-
     try {
         await connection.beginTransaction();
+        const [accounts] = await connection.query(
+            `select account_id from accounts where user_id = ?
+            for update`,[userId]);
+
+        if (accounts.length === 0) {
+            throw new Error("Account not found");
+        }
+
+        const accountId = accounts[0].account_id;
 
         const [existing] = await connection.query(
-            `select transaction_id, status
-             from transactions
-             where idempotency_key = ?`,
-            [idempotencyKey]
-        );
+            `select transaction_id, status from transactions
+            where idempotency_key = ?`, [idempotencyKey]);
 
         if (existing.length > 0) {
             await connection.rollback();
-            connection.release();
             return res.status(200).json({
                 message: "Transaction already exists",
                 transaction_id: existing[0].transaction_id,
@@ -146,66 +122,31 @@ const withdrawal = asyncHandler(async (req, res) => {
         }
 
         const [transaction] = await connection.query(
-            `insert into transactions
-             (idempotency_key, type, status)
-             values (?,'withdrawal', 'processing')`,
-            [idempotencyKey]
-        );
+            `insert into transactions (idempotency_key, type, status)
+            values (?, 'withdrawal', 'processing')`, [idempotencyKey]);
 
         const transactionId = transaction.insertId;
 
-        const [accounts] = await connection.query(
-            `select account_id, balance
-             from accounts
-             where account_id = ?
-             for update`,
-            [id]
-        );
-
-        if (accounts.length === 0) {
-            throw new Error("Account not found");
-        }
-
-        const account = accounts[0];
-        const newBalance = Number(account.balance) - Number(amount);
-
-        if (newBalance < 0) {
-            throw new Error("Insufficient balance");
-        }
+        const newBalance = await withdrawFromAccount(connection,
+        accountId, amount, transactionId);
 
         await connection.query(
-            `update accounts
-             set balance = ?
-             where account_id = ?`,
-            [newBalance, account.account_id]
-        );
-        await connection.query(
-            `insert into ledger
-             (transaction_id, account_id, direction, amount, balance_after)
-             VALUES (?, ?, 'debit', ?, ?)`,
-            [transactionId,account.account_id,amount,newBalance]
-        );
-        await connection.query(
-            `update transactions
-            set status = 'completed'
-            where transaction_id = ?`,
-            [transactionId]
-        );
+            `update transactions set status = 'completed'
+            where transaction_id = ?`, [transactionId]);
+
         await connection.commit();
-        connection.release();
+
         return res.status(200).json({
             message: "Withdrawal successful",
             transaction_id: transactionId,
             amount: amount,
             balance: newBalance
         });
-
     } catch (error) {
         await connection.rollback();
-        connection.release();
         console.error(error);
-        return res.status(500).json({
-            message: "Withdrawal failed"
+        return res.status(400).json({
+            message: error.message || "Withdrawal failed"
         });
     } finally {
         connection.release();
@@ -214,24 +155,19 @@ const withdrawal = asyncHandler(async (req, res) => {
 
 const transfer = asyncHandler(async (req, res) => {
 
-    const { amount, sender_id, receiver_id } = req.body;
+    const { amount, receiver_account_id} = req.body;
+    const userId = req.user.user_id;
     const idempotencyKey = req.headers["idempotency-key"];
 
-    if (!amount || amount <= 0) {
+    if (!amount || Number(amount) <= 0) {
         return res.status(400).json({
             message: "Enter a valid amount"
         });
     }
 
-    if (!sender_id || !receiver_id) {
+    if (!receiver_account_id) {
         return res.status(400).json({
-            message: "Enter sender_id and receiver_id"
-        });
-    }
-
-    if (sender_id === receiver_id) {
-        return res.status(400).json({
-            message: "Sender and receiver cannot be same"
+            message: "Receiver account ID is required"
         });
     }
 
@@ -245,12 +181,35 @@ const transfer = asyncHandler(async (req, res) => {
 
     try {
         await connection.beginTransaction();
+        const [senderAccounts] = await connection.query(
+            `select account_id from accounts where user_id = ?`,
+            [userId]);
+
+        if (senderAccounts.length === 0) {
+            throw new Error("Sender account not found");
+        }
+
+        const senderAccountId = senderAccounts[0].account_id;
+
+        const receiverAccountId = Number(receiver_account_id);
+
+        if (senderAccountId === receiverAccountId) {
+            throw new Error(
+                "Sender and receiver cannot be the same"
+            );
+        }
+
+        const [receiverAccounts] = await connection.query(
+            `select account_id from accounts where account_id = ?`,
+            [receiverAccountId]);
+
+        if (receiverAccounts.length === 0) {
+            throw new Error("Receiver account not found");
+        }
+
         const [existing] = await connection.query(
-            `select transaction_id, status
-             from transactions
-             where idempotency_key = ?`,
-            [idempotencyKey]
-        );
+            `select transaction_id, status from transactions
+            where idempotency_key = ?`, [idempotencyKey]);
 
         if (existing.length > 0) {
             await connection.rollback();
@@ -262,41 +221,43 @@ const transfer = asyncHandler(async (req, res) => {
         }
 
         const [transaction] = await connection.query(
-            `insert INTO transactions
-             (idempotency_key, type, status)
-             values (?, 'transfer', 'processing')`,
-            [idempotencyKey]
-        );
+            `insert into transactions (idempotency_key, type, status)
+            values (?, 'transfer', 'processing')`, [idempotencyKey]);
 
         const transactionId = transaction.insertId;
-        const senderBalance = await withdrawFromAccount(connection,sender_id,
-            amount,transactionId);
-
-        const receiverBalance = await depositToAccount(connection,receiver_id,
-            amount,transactionId);
+        const firstAccount = Math.min(senderAccountId, receiverAccountId);
+        const secondAccount = Math.max(senderAccountId, receiverAccountId);
+        await connection.query(
+            `select account_id from accounts where account_id = ?
+            for update`, [firstAccount]);
 
         await connection.query(
-            `update transactions
-             set status = 'completed'
-             where transaction_id = ?`,
-            [transactionId]
-        );
+            `select account_id from accounts where account_id = ?
+            for update`, [secondAccount]);
+
+        const senderBalance = await withdrawFromAccount(
+            connection, senderAccountId, amount, transactionId);
+
+        const receiverBalance = await depositToAccount(connection,
+            receiverAccountId, amount, transactionId);
+
+        await connection.query(
+            `update transactions set status = 'completed'
+            where transaction_id = ?`, [transactionId]);
 
         await connection.commit();
         return res.status(200).json({
             message: "Transfer successful",
             transaction_id: transactionId,
-            sender_id,
-            receiver_id,
-            amount,
+            receiver_account_id: receiverAccountId,
+            amount: amount,
             sender_balance: senderBalance,
             receiver_balance: receiverBalance
         });
-
     } catch (error) {
         await connection.rollback();
         console.error(error);
-        return res.status(500).json({
+        return res.status(400).json({
             message: error.message || "Transfer failed"
         });
     } finally {
@@ -305,24 +266,21 @@ const transfer = asyncHandler(async (req, res) => {
 });
 
 const getAll = asyncHandler(async (req, res) => {
-
-    const { id } = req.params;
+    const userId = req.user.user_id;
     const [transactions] = await db.query(
-        `select
-            t.transaction_id, t.type, t.status, t.created_at,
+        `select t.transaction_id, t.type, t.status, t.created_at,
             l.account_id, l.direction, l.amount, l.balance_after
-         from transactions t
-         join ledger l
+        from transactions t
+        join ledger l
             on t.transaction_id = l.transaction_id
-         join accounts a
+        join accounts a
             on l.account_id = a.account_id
-         where a.user_id = ?
-         order by t.created_at DESC`,
-        [id]
+        where a.user_id = ?
+        order by t.created_at DESC`, [userId]
     );
 
     return res.status(200).json({
-        user_id: id,
+        user_id: userId,
         count: transactions.length,
         transactions: transactions
     });
