@@ -12,21 +12,14 @@ The system focuses on important backend concepts such as database transactions, 
 
 ## Features
 
-- User registration
-- Password hashing using bcrypt
-- Account creation
-- Account balance management
-- Deposit money
-- Withdraw money
-- Transfer money between accounts
-- Transaction status tracking
+-  User registration with bcrypt password hashing
+- JWT-based authentication and authorization
+- Account creation and balance management
+- Deposits, withdrawals, and account-to-account transfers
+- Transaction ledger and history with status tracking
 - Idempotency keys to prevent duplicate transactions
-- Transaction ledger
-- Database transactions using MySQL
-- Row-level locking using `SELECT ... FOR UPDATE`
-- Transaction history
-- RESTful API design
-- JSON request/response handling
+- MySQL database transactions and row-level locking (SELECT ... FOR UPDATE)
+- RESTful APIs with JSON request/response handling
 
 ---
 
@@ -39,5 +32,5 @@ The system focuses on important backend concepts such as database transactions, 
 | MySQL 8 | Relational database |
 | mysql2 | MySQL driver |
 | bcrypt | Password hashing |
-| Postman | API testing |
+| Postman | API testing, Authorization |
 
